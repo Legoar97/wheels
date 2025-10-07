@@ -64,11 +64,12 @@ export const AuthProvider = ({ children }) => {
       if (data.user) {
         console.log('✅ Usuario creado, creando perfil...');
         
-        // 2. Crear el perfil automáticamente
+        // 2. Crear el perfil automáticamente con EMAIL incluido
         const { error: profileError } = await supabase
           .from('profiles')
           .insert({
             id: data.user.id,
+            email: email,  // ✅ AGREGADO: Ahora sí se guarda el email
             full_name: fullName,
             user_type: 'pasajero',
           });
@@ -77,7 +78,7 @@ export const AuthProvider = ({ children }) => {
           console.error('❌ Error creating profile:', profileError);
           // No mostrar error al usuario, el perfil se puede crear después
         } else {
-          console.log('✅ Perfil creado exitosamente');
+          console.log('✅ Perfil creado exitosamente con email:', email);
         }
 
         toast({ 

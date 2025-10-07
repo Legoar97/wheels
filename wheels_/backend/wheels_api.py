@@ -1,26 +1,39 @@
 #!/usr/bin/env python3
 """
-WHEELS Matchmaking API Service - CORREGIDO
-Mejoras:
-1. Filtros más flexibles para searching_pool
-2. Mejor logging para debug
-3. Manejo de estados NULL
+WHEELS API UNIFICADA
+Combina matchmaking y optimización de rutas en un solo servicio
+Puerto: 5000
 """
 
 import os
 import json
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import pandas as pd
 from supabase import create_client, Client
 from geopy.distance import geodesic
 import requests
 
+# Importar el optimizador
+from pickup_optimization_service import PickupOptimizer, get_trip_data_for_driver
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Flask app setup
+app = Flask(__name__)
+CORS(app)
+
+# Supabase configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://ozvjmkvmpxxviveniuwt.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "your-supabase-key")
+
+def get_supabase_client():
+    """Create and return Supabase client"""
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def calculate_google_maps_distance(origin, destination, api_key=None):
     """Calcula distancia real usando Google Maps Distance Matrix API"""
@@ -85,54 +98,15 @@ def calculate_haversine_distance(origin, destination):
             'source': 'error'
         }
 
-# Flask app setup
-app = Flask(__name__)
-CORS(app)
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint for API availability"""
-    try:
-        supabase = get_supabase_client()
-        supabase.table('profiles').select("id").limit(1).execute()
-        
-        return jsonify({
-            "success": True,
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "services": {
-                "supabase": "connected",
-                "google_maps": "available" if os.getenv('GOOGLE_MAPS_API_KEY') else "not_configured"
-            }
-        })
-    except Exception as e:
-        logger.error(f"❌ Health check failed: {str(e)}")
-        return jsonify({
-            "success": False,
-            "status": "unhealthy",
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-# Supabase configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://ozvjmkvmpxxviveniuwt.supabase.co")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "your-supabase-key")
-
-def get_supabase_client():
-    """Create and return Supabase client"""
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
-
 def get_wheels_dataframes():
     """Fetch all necessary data from Supabase"""
     try:
         logger.info("🔌 Connecting to Supabase...")
         supabase = get_supabase_client()
         
-        # Fetch all required tables
         profiles_response = supabase.table('profiles').select("*").execute()
         searching_pool_response = supabase.table('searching_pool').select("*").execute()
         
-        # Convert to DataFrames
         profiles_df = pd.DataFrame(profiles_response.data)
         searching_pool_df = pd.DataFrame(searching_pool_response.data)
         
@@ -144,75 +118,35 @@ def get_wheels_dataframes():
         raise
 
 def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
-    """
-    🔧 VERSIÓN CORREGIDA del algoritmo de matchmaking
-    Mejoras:
-    1. Filtros más flexibles (acepta NULL y 'searching')
-    2. Mejor logging para debugging
-    3. Validación de datos robusta
-    """
+    """Algoritmo de matchmaking mejorado"""
     try:
-        # Debug: Mostrar todos los registros
         logger.info(f"📊 Total registros en searching_pool: {len(searching_pool_df)}")
+        
         if not searching_pool_df.empty:
             logger.info(f"📋 Columnas disponibles: {list(searching_pool_df.columns)}")
-            
-            # Mostrar estados únicos
             if 'status' in searching_pool_df.columns:
                 logger.info(f"📋 Estados únicos: {searching_pool_df['status'].unique()}")
                 logger.info(f"📋 Valores NULL en status: {searching_pool_df['status'].isna().sum()}")
-            
-            # Mostrar tipos de usuario
             if 'tipo_de_usuario' in searching_pool_df.columns:
                 logger.info(f"📋 Tipos de usuario: {searching_pool_df['tipo_de_usuario'].unique()}")
         
-        # 🔧 FIX 1: FILTROS MÁS FLEXIBLES
-        # Antes solo aceptaba status='searching', ahora acepta NULL y 'searching'
-        # Esto es crítico porque muchos registros pueden tener status NULL al inicio
+        # Filtros más flexibles
         active_pool = searching_pool_df[
             (searching_pool_df["status"].isna()) |
             (searching_pool_df["status"] == "searching") |
             (searching_pool_df["status"] == "")
         ].copy()
         
-        logger.info(f"📊 Registros activos después del filtro mejorado: {len(active_pool)}")
+        logger.info(f"📊 Registros activos después del filtro: {len(active_pool)}")
         
         if active_pool.empty:
             logger.warning("⚠️ No hay registros activos en searching pool")
-            logger.info("💡 TIP: Verifica que los registros tengan status NULL o 'searching'")
             return []
         
-        # Validar columnas requeridas
-        required_columns = ['tipo_de_usuario', 'pickup_lat', 'pickup_lng', 'destino']
-        missing_columns = [col for col in required_columns if col not in active_pool.columns]
-        
-        if missing_columns:
-            logger.error(f"❌ Columnas faltantes en searching_pool: {missing_columns}")
-            return []
-        
-        # Separate drivers and passengers
         drivers = active_pool[active_pool["tipo_de_usuario"] == "conductor"].copy()
         passengers = active_pool[active_pool["tipo_de_usuario"] == "pasajero"].copy()
         
         logger.info(f"🔍 Found {len(drivers)} drivers, {len(passengers)} passengers")
-        
-        # Debug: Mostrar detalles de drivers
-        if len(drivers) > 0:
-            logger.info("🚗 Conductores encontrados:")
-            for idx, driver in drivers.iterrows():
-                logger.info(f"  - ID: {driver.get('id', 'N/A')}, Email: {driver.get('correo_usuario', 'N/A')}, Destino: {driver.get('destino', 'N/A')}")
-        else:
-            logger.warning("⚠️ No hay conductores disponibles")
-            logger.info("💡 TIP: Verifica que existan registros con tipo_de_usuario='conductor'")
-        
-        # Debug: Mostrar detalles de passengers  
-        if len(passengers) > 0:
-            logger.info("🚶 Pasajeros encontrados:")
-            for idx, passenger in passengers.iterrows():
-                logger.info(f"  - ID: {passenger.get('id', 'N/A')}, Email: {passenger.get('correo_usuario', 'N/A')}, Destino: {passenger.get('destino', 'N/A')}")
-        else:
-            logger.warning("⚠️ No hay pasajeros disponibles")
-            logger.info("💡 TIP: Verifica que existan registros con tipo_de_usuario='pasajero'")
         
         if len(drivers) == 0 or len(passengers) == 0:
             return []
@@ -221,9 +155,8 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
         
         for _, driver in drivers.iterrows():
             try:
-                # Validar datos del conductor
                 if pd.isna(driver.get("pickup_lat")) or pd.isna(driver.get("pickup_lng")):
-                    logger.warning(f"⚠️ Conductor {driver.get('id')} sin coordenadas, saltando")
+                    logger.warning(f"⚠️ Conductor sin coordenadas, saltando")
                     continue
                 
                 driver_location = (driver["pickup_lat"], driver["pickup_lng"])
@@ -232,10 +165,10 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
                 driver_email = driver.get("correo_usuario")
                 
                 if not driver_email:
-                    logger.warning(f"⚠️ Driver {driver['id']} has no email, skipping")
+                    logger.warning(f"⚠️ Driver sin email, saltando")
                     continue
                 
-                logger.info(f"🚗 Processing driver: {driver_email} - Destination: {driver_destination}")
+                logger.info(f"🚗 Processing driver: {driver_email}")
                 
                 matched_passengers = []
                 current_time = 0
@@ -243,20 +176,15 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
                 
                 for _, passenger in passengers.iterrows():
                     try:
-                        # Validar datos del pasajero
                         if pd.isna(passenger.get("pickup_lat")) or pd.isna(passenger.get("pickup_lng")):
-                            logger.warning(f"⚠️ Pasajero {passenger.get('id')} sin coordenadas, saltando")
                             continue
                         
-                        # Check destination compatibility
                         if passenger["destino"] != driver_destination:
                             continue
                         
-                        # Calculate distance
                         passenger_location = (passenger["pickup_lat"], passenger["pickup_lng"])
                         distance_result = calculate_google_maps_distance(last_location, passenger_location)
                         
-                        # Extract ETA
                         eta_minutes = 0
                         if 'duration' in distance_result and isinstance(distance_result['duration'], str):
                             try:
@@ -270,16 +198,13 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
                         if distance_result['distance'] > max_distance_km:
                             continue
                         
-                        # Check available seats
                         if len(matched_passengers) >= available_seats:
                             break
                         
                         passenger_email = passenger.get("correo_usuario")
                         if not passenger_email:
-                            logger.warning(f"⚠️ Passenger {passenger['id']} has no email, skipping")
                             continue
                         
-                        # Get passenger name
                         passenger_name = "Pasajero"
                         if not profiles_df.empty and "email" in profiles_df.columns:
                             passenger_profile = profiles_df[profiles_df["email"] == passenger_email]
@@ -306,14 +231,13 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
                             "pickup_eta": current_time
                         })
                         
-                        logger.info(f"✅ Matched passenger: {passenger_email} - {distance_result['distance']}km - ETA: {current_time} min")
+                        logger.info(f"✅ Matched passenger: {passenger_email}")
                         
                     except Exception as e:
-                        logger.error(f"❌ Error processing passenger {passenger.get('id', 'unknown')}: {e}")
+                        logger.error(f"❌ Error processing passenger: {e}")
                         continue
                 
                 if matched_passengers:
-                    # Get driver name
                     driver_name = "Conductor"
                     if not profiles_df.empty and "email" in profiles_df.columns:
                         driver_profile = profiles_df[profiles_df["email"] == driver_email]
@@ -341,10 +265,10 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
                         "pasajeros_asignados": matched_passengers
                     })
                     
-                    logger.info(f"🎯 Created match for driver: {driver_email} with {len(matched_passengers)} passengers")
+                    logger.info(f"🎯 Match created with {len(matched_passengers)} passengers")
             
             except Exception as e:
-                logger.error(f"❌ Error processing driver {driver.get('id', 'unknown')}: {e}")
+                logger.error(f"❌ Error processing driver: {e}")
                 continue
         
         logger.info(f"🎉 Total matches created: {len(matches)}")
@@ -352,17 +276,45 @@ def match_rides_enhanced(searching_pool_df, profiles_df, max_distance_km=5):
         
     except Exception as e:
         logger.error(f"❌ Error in matching algorithm: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         return []
+
+# ============================================================================
+# 🔹 ENDPOINTS - MATCHMAKING
+# ============================================================================
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    try:
+        supabase = get_supabase_client()
+        supabase.table('profiles').select("id").limit(1).execute()
+        
+        return jsonify({
+            "success": True,
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "services": {
+                "supabase": "connected",
+                "google_maps": "available" if os.getenv('GOOGLE_MAPS_API_KEY') else "not_configured",
+                "matchmaking": "enabled",
+                "route_optimization": "enabled"
+            }
+        })
+    except Exception as e:
+        logger.error(f"❌ Health check failed: {str(e)}")
+        return jsonify({
+            "success": False,
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 @app.route('/api/python-matchmaking', methods=['POST', 'GET'])
 def run_matchmaking():
-    """Main API endpoint for running the matchmaking algorithm"""
+    """Main matchmaking endpoint"""
     try:
         logger.info("🚀 Starting matchmaking process...")
         
-        # Get data from Supabase
         profiles_df, searching_pool_df = get_wheels_dataframes()
         
         if searching_pool_df.empty:
@@ -374,7 +326,6 @@ def run_matchmaking():
                 "timestamp": datetime.now().isoformat()
             })
         
-        # Run matching algorithm
         matches = match_rides_enhanced(searching_pool_df, profiles_df)
         
         response = {
@@ -382,7 +333,7 @@ def run_matchmaking():
             "matches": matches,
             "total_matches": len(matches),
             "timestamp": datetime.now().isoformat(),
-            "message": f"Matchmaking completed successfully. Found {len(matches)} matches."
+            "message": f"Matchmaking completed. Found {len(matches)} matches."
         }
         
         logger.info(f"✅ Matchmaking completed: {len(matches)} matches found")
@@ -390,8 +341,6 @@ def run_matchmaking():
         
     except Exception as e:
         logger.error(f"❌ Error in matchmaking API: {str(e)}")
-        import traceback
-        logger.error(traceback.format_exc())
         return jsonify({
             "success": False,
             "error": str(e),
@@ -400,27 +349,9 @@ def run_matchmaking():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-@app.route('/api/trigger-matchmaking', methods=['POST'])
-def trigger_matchmaking():
-    """Endpoint for database triggers or webhooks"""
-    try:
-        logger.info("🔔 Matchmaking triggered automatically")
-        data = request.get_json() or {}
-        logger.info(f"Trigger data: {data}")
-        
-        return run_matchmaking()
-            
-    except Exception as e:
-        logger.error(f"❌ Error in trigger endpoint: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
 @app.route('/api/matches/<user_email>', methods=['GET'])
 def get_user_matches(user_email):
-    """Get matches for a specific user by email"""
+    """Get matches for a specific user"""
     try:
         logger.info(f"🔍 Getting matches for user: {user_email}")
         
@@ -431,10 +362,7 @@ def get_user_matches(user_email):
         
         for match in all_matches:
             if match["correo_conductor"] == user_email:
-                user_matches.append({
-                    "role": "driver",
-                    "match": match
-                })
+                user_matches.append({"role": "driver", "match": match})
             
             for passenger in match["pasajeros_asignados"]:
                 if passenger["correo"] == user_email:
@@ -467,37 +395,44 @@ def get_passenger_trip(user_email):
         logger.info(f"🔍 Getting active trip for passenger: {user_email}")
         supabase = get_supabase_client()
 
-        profile_response = supabase.table('profiles').select("id").eq("email", user_email).single().execute()
+        # 1. Find the passenger's profile ID
+        profile_response = supabase.table('profiles').select("id").eq("email", user_email).execute()
         if not profile_response.data:
             return jsonify({"success": False, "error": "Passenger not found"}), 404
-        passenger_id = profile_response.data['id']
+        passenger_id = profile_response.data[0]['id']
 
-        trip_data_response = supabase.table('trip_data').select("*").contains(
-            "passengers_data", [{"passenger_id": str(passenger_id)}]
-        ).eq("status", "in_progress").order("created_at", desc=True).limit(1).execute()
+        # 2. Find an active trip in trip_data where this passenger is assigned and status is 'in_progress'
+        trip_data_response = supabase.table('trip_data').select("*").eq("status", "in_progress").execute()
 
         if not trip_data_response.data:
-            return jsonify({"success": False, "message": "No active trip found"}), 404
+            return jsonify({"success": False, "message": "No active trip found for passenger"}), 404
 
-        trip = trip_data_response.data[0]
+        # 3. Find trip where passenger is included
+        passenger_trip = None
         passenger_details = None
-        for p in trip['passengers_data']:
-            if p.get('passenger_id') == str(passenger_id):
-                passenger_details = p
+        
+        for trip in trip_data_response.data:
+            passengers_data = trip.get('passengers_data', [])
+            for p in passengers_data:
+                if p.get('passenger_id') == str(passenger_id):
+                    passenger_trip = trip
+                    passenger_details = p
+                    break
+            if passenger_trip:
                 break
 
-        if not passenger_details:
-            return jsonify({"success": False, "error": "Passenger details not found"}), 404
+        if not passenger_trip:
+            return jsonify({"success": False, "message": "No active trip found for passenger"}), 404
 
         return jsonify({
             "success": True,
             "trip": {
-                "trip_id": trip['id'],
-                "driver_id": trip['driver_id'],
-                "pickup_address": trip['pickup_address'],
-                "dropoff_address": trip['dropoff_address'],
+                "trip_id": passenger_trip['id'],
+                "driver_id": passenger_trip['driver_id'],
+                "pickup_address": passenger_trip['pickup_address'],
+                "dropoff_address": passenger_trip['dropoff_address'],
                 "passenger": passenger_details,
-                "status": trip['status']
+                "status": passenger_trip['status']
             }
         })
 
@@ -535,11 +470,82 @@ def get_user_active_state(user_email):
         logger.error(f"❌ Error getting user active state: {str(e)}")
         return jsonify({"state": "error", "error": str(e)}), 500
 
+# ============================================================================
+# 🔹 ENDPOINTS - ROUTE OPTIMIZATION
+# ============================================================================
+
+@app.route('/api/trip-optimization/<trip_id>', methods=['GET'])
+def get_trip_optimization(trip_id):
+    """Obtiene la optimización de ruta para un viaje específico"""
+    try:
+        trip_type = request.args.get('trip_type', 'ida')
+        
+        trip_data = get_trip_data_for_driver(trip_id, trip_type)
+        
+        if not trip_data:
+            return jsonify({
+                'success': False,
+                'error': 'Viaje no encontrado'
+            }), 404
+        
+        return jsonify({
+            'success': True,
+            'data': trip_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/trip-optimization/<trip_id>/step/<int:step_number>', methods=['GET'])
+def get_trip_step(trip_id, step_number):
+    """Obtiene un paso específico del viaje"""
+    try:
+        trip_type = request.args.get('trip_type', 'ida')
+        trip_data = get_trip_data_for_driver(trip_id, trip_type)
+        
+        if not trip_data:
+            return jsonify({'success': False, 'error': 'Viaje no encontrado'}), 404
+        
+        steps = trip_data.get('optimized_route', {}).get('steps', [])
+        
+        if step_number >= len(steps):
+            return jsonify({'success': False, 'error': 'Paso no encontrado'}), 404
+        
+        step_data = steps[step_number]
+        step_data['is_last_step'] = step_number == len(steps) - 1
+        step_data['total_steps'] = len(steps)
+        step_data['current_step'] = step_number
+        
+        return jsonify({'success': True, 'data': step_data})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ============================================================================
+# 🔹 MAIN
+# ============================================================================
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('DEBUG', 'false').lower() == 'true'
     
-    logger.info(f"🚀 Starting WHEELS Matchmaking API on port {port}")
-    logger.info(f"🔧 Debug mode: {debug}")
+    logger.info("="*60)
+    logger.info("🚀 WHEELS API UNIFICADA")
+    logger.info("="*60)
+    logger.info(f"📡 Puerto: {port}")
+    logger.info(f"🔧 Debug: {debug}")
+    logger.info(f"🔌 Supabase: {SUPABASE_URL}")
+    logger.info(f"🗺️  Google Maps: {'✅' if os.getenv('GOOGLE_MAPS_API_KEY') else '❌'}")
+    logger.info("")
+    logger.info("📋 Endpoints disponibles:")
+    logger.info("   • GET  /api/health")
+    logger.info("   • POST /api/python-matchmaking")
+    logger.info("   • GET  /api/matches/<user_email>")
+    logger.info("   • GET  /api/trip-optimization/<trip_id>")
+    logger.info("   • GET  /api/trip-optimization/<trip_id>/step/<step_number>")
+    logger.info("="*60)
     
     app.run(host='0.0.0.0', port=port, debug=debug, threaded=True)

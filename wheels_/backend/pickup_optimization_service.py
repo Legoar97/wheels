@@ -1,27 +1,20 @@
 import os
 import json
-import time
 import requests
 import pandas as pd
 from datetime import datetime, timezone
 from supabase import create_client, Client
-from urllib.parse import quote_plus
 from typing import Dict, List, Tuple, Optional
 
 # ================================================
 # 🔹 Conexión a Supabase
 # ================================================
 def get_wheels_dataframes():
-    # Credenciales de tu proyecto
     url = os.getenv("SUPABASE_URL", "https://ozvjmkvmpxxviveniuwt.supabase.co")
-    
-    # 🚨 Usa tu service_role key en vez de anon key
     key = os.getenv("SUPABASE_KEY", "your-supabase-key")
     
-    # Crear cliente
     supabase: Client = create_client(url, key)
     
-    # Consultar tablas
     profiles_response = supabase.table('profiles').select("*").execute()
     vehicles_response = supabase.table('vehicles').select("*").execute()
     searching_pool_response = supabase.table('searching_pool').select("*").execute()
@@ -29,14 +22,6 @@ def get_wheels_dataframes():
     confirmed_trips_response = supabase.table('confirmed_trips').select("*").execute()
     start_of_trip_response = supabase.table('start_of_trip').select("*").execute()
     
-    # Debug para start_of_trip
-    print("=== Respuesta cruda start_of_trip ===")
-    print(start_of_trip_response)
-    print("=== Datos devueltos start_of_trip ===")
-    print(start_of_trip_response.data)
-    print("=====================================")
-
-    # Convertir a DataFrames
     profiles_df = pd.DataFrame(profiles_response.data)
     vehicles_df = pd.DataFrame(vehicles_response.data)
     searching_pool_df = pd.DataFrame(searching_pool_response.data)
@@ -55,19 +40,19 @@ def get_wheels_dataframes():
     )
 
 # ================================================
-# 🔹 Configuración de Google Maps API
+# 🔹 Google Maps API
 # ================================================
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "your-google-maps-api-key")
 
 def get_distance_duration(origin, destination, api_key=GOOGLE_MAPS_API_KEY):
-    """
-    Llama a Google Distance Matrix API para calcular distancia y duración
-    """
+    """Calcula distancia y duración entre dos puntos"""
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     params = {
         "origins": origin,
         "destinations": destination,
-        "key": api_key
+        "key": api_key,
+        "mode": "driving",
+        "departure_time": "now"
     }
     response = requests.get(url, params=params).json()
     
@@ -80,34 +65,159 @@ def get_distance_duration(origin, destination, api_key=GOOGLE_MAPS_API_KEY):
             )
     return (0, 0)
 
-def get_route_optimization(origin, destinations, api_key=GOOGLE_MAPS_API_KEY):
-    """
-    Usa Google Maps Directions API para optimizar la ruta
-    """
-    # Convertir destinos a string separado por |
+def get_distance_matrix(origins: List[str], destinations: List[str], api_key=GOOGLE_MAPS_API_KEY):
+    """Obtiene matriz de distancias entre múltiples puntos"""
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+    
+    origins_str = "|".join(origins)
     destinations_str = "|".join(destinations)
     
-    url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
-        "origin": origin,
-        "destination": destinations_str,
-        "waypoints": "optimize:true|" + destinations_str,
-        "key": api_key
+        "origins": origins_str,
+        "destinations": destinations_str,
+        "key": api_key,
+        "mode": "driving",
+        "departure_time": "now"
     }
     
     response = requests.get(url, params=params).json()
     
-    if response["status"] == "OK":
-        route = response["routes"][0]
-        waypoint_order = route.get("waypoint_order", [])
-        legs = route["legs"]
-        
-        return waypoint_order, legs
+    if response["status"] != "OK":
+        print(f"❌ Error en Distance Matrix API: {response['status']}")
+        return None
     
-    return [], []
+    matrix = {
+        'distances': [],
+        'durations': []
+    }
+    
+    for row in response["rows"]:
+        distance_row = []
+        duration_row = []
+        
+        for element in row["elements"]:
+            if element["status"] == "OK":
+                distance_row.append(element["distance"]["value"])
+                duration_row.append(element["duration"]["value"])
+            else:
+                distance_row.append(float('inf'))
+                duration_row.append(float('inf'))
+        
+        matrix['distances'].append(distance_row)
+        matrix['durations'].append(duration_row)
+    
+    return matrix
 
 # ================================================
-# 🔹 Algoritmo de Optimización de Recogida
+# 🔹 Algoritmo de Ruta Escolar
+# ================================================
+def school_route_algorithm(start_address: str, waypoint_addresses: List[str], 
+                          destination_address: str, trip_type: str, api_key=GOOGLE_MAPS_API_KEY):
+    """
+    Algoritmo de ruta escolar optimizado:
+    
+    IDA (a la universidad):
+    - Recoger primero a los MÁS LEJOS de la universidad
+    - Así van llegando más pasajeros mientras nos acercamos
+    
+    REGRESO (desde la universidad):
+    - Dejar primero a los MÁS CERCA de la universidad
+    - El conductor termina más cerca de su casa
+    """
+    
+    if not waypoint_addresses:
+        return [], []
+    
+    print(f"🚌 Calculando ruta escolar ({trip_type})...")
+    
+    # Lista completa de direcciones
+    all_addresses = [start_address] + waypoint_addresses + [destination_address]
+    
+    # Obtener matriz de distancias
+    print("📊 Obteniendo matriz de distancias...")
+    matrix = get_distance_matrix(all_addresses, all_addresses, api_key)
+    
+    if not matrix:
+        print("❌ Error obteniendo matriz, usando orden secuencial")
+        return list(range(len(waypoint_addresses))), []
+    
+    durations = matrix['durations']
+    distances = matrix['distances']
+    
+    # Índice del destino (universidad)
+    destination_idx = len(all_addresses) - 1
+    
+    # Calcular distancia de cada pasajero al destino
+    passengers_with_distance = []
+    
+    print(f"\n📍 Distancias {'desde' if trip_type == 'regreso' else 'hacia'} el destino:")
+    for i in range(len(waypoint_addresses)):
+        waypoint_global_idx = i + 1
+        
+        if trip_type == "ida":
+            # IDA: distancia desde pasajero a destino
+            distance_to_dest = durations[waypoint_global_idx][destination_idx]
+        else:
+            # REGRESO: distancia desde destino (universidad) a pasajero
+            distance_to_dest = durations[destination_idx][waypoint_global_idx]
+        
+        passengers_with_distance.append({
+            'index': i,
+            'distance_to_destination': distance_to_dest
+        })
+        
+        print(f"   Pasajero {i+1}: {distance_to_dest/60:.1f} min")
+    
+    # ORDENAR según el tipo de viaje
+    if trip_type == "ida":
+        # IDA: MÁS LEJOS primero (descendente)
+        passengers_with_distance.sort(key=lambda x: -x['distance_to_destination'])
+        print("\n🔍 Orden IDA: Recogiendo del MÁS LEJOS al más cerca")
+    else:
+        # REGRESO: MÁS CERCA primero (ascendente)
+        passengers_with_distance.sort(key=lambda x: x['distance_to_destination'])
+        print("\n🔍 Orden REGRESO: Dejando del MÁS CERCA al más lejos")
+    
+    # Extraer el orden optimizado
+    route_order = [p['index'] for p in passengers_with_distance]
+    
+    # Mostrar el orden
+    for i, p in enumerate(passengers_with_distance):
+        print(f"  {i+1}. Pasajero {p['index']+1} ({p['distance_to_destination']/60:.1f} min)")
+    
+    # Construir información de legs
+    legs = []
+    prev_idx = 0  # Empezamos desde el conductor
+    
+    for waypoint_idx in route_order:
+        global_idx = waypoint_idx + 1
+        legs.append({
+            'distance_m': distances[prev_idx][global_idx],
+            'duration_s': durations[prev_idx][global_idx],
+            'from_address': all_addresses[prev_idx],
+            'to_address': all_addresses[global_idx]
+        })
+        prev_idx = global_idx
+    
+    # Leg final al destino
+    legs.append({
+        'distance_m': distances[prev_idx][destination_idx],
+        'duration_s': durations[prev_idx][destination_idx],
+        'from_address': all_addresses[prev_idx],
+        'to_address': all_addresses[destination_idx]
+    })
+    
+    total_duration = sum(leg['duration_s'] for leg in legs)
+    total_distance = sum(leg['distance_m'] for leg in legs)
+    
+    print(f"\n✅ Ruta optimizada: {[x+1 for x in route_order]}")
+    print(f"   📏 Distancia total: {total_distance/1000:.2f} km")
+    print(f"   ⏱️  Duración total: {total_duration / 60:.1f} min")
+    
+    return route_order, legs
+
+# ================================================
+# 🔹 Clase PickupOptimizer
 # ================================================
 class PickupOptimizer:
     def __init__(self, api_key=GOOGLE_MAPS_API_KEY):
@@ -115,16 +225,7 @@ class PickupOptimizer:
         
     def calculate_optimal_pickup_order(self, conductor_data: Dict, pasajeros_data: List[Dict], 
                                      destination: str, trip_type: str = "ida") -> Dict:
-        """
-        Calcula el orden óptimo de recogida usando Google Maps API
-        
-        Args:
-            conductor_data: Datos del conductor
-            pasajeros_data: Lista de datos de pasajeros
-            destination: Destino final del viaje
-            trip_type: "ida" o "regreso"
-        """
-        
+        """Calcula el orden óptimo de recogida"""
         if trip_type == "ida":
             return self._optimize_pickup_trip(conductor_data, pasajeros_data, destination)
         else:
@@ -132,30 +233,34 @@ class PickupOptimizer:
     
     def _optimize_pickup_trip(self, conductor_data: Dict, pasajeros_data: List[Dict], 
                             destination: str) -> Dict:
-        """
-        Optimiza el viaje de ida (recogida de pasajeros)
-        """
+        """Optimiza el viaje de IDA (recogida)"""
         conductor_address = conductor_data["direccion_de_viaje"]
         passenger_addresses = [p["direccion_de_viaje"] for p in pasajeros_data]
         
-        # Usar Google Maps para optimizar la ruta
-        waypoint_order, legs = get_route_optimization(
+        print("\n" + "="*60)
+        print("🚗 OPTIMIZANDO RUTA DE IDA (Recogida)")
+        print("="*60)
+        
+        # Usar algoritmo de ruta escolar
+        waypoint_order, legs = school_route_algorithm(
             conductor_address, 
             passenger_addresses, 
+            destination,
+            "ida",
             self.api_key
         )
         
-        # Si la optimización falla, usar orden secuencial
         if not waypoint_order:
+            print("⚠️ Usando orden secuencial como fallback")
             waypoint_order = list(range(len(pasajeros_data)))
+            legs = []
         
-        # Construir el orden optimizado
+        # Construir orden optimizado con detalles
         optimized_order = []
-        current_address = conductor_address
         cumulative_distance = 0
         cumulative_duration = 0
         
-        # Agregar conductor como punto de inicio
+        # Paso 0: Conductor
         optimized_order.append({
             "step": 0,
             "type": "conductor",
@@ -170,16 +275,21 @@ class PickupOptimizer:
             "instruction": "Punto de inicio del conductor"
         })
         
-        # Procesar pasajeros en orden optimizado
+        # Pasajeros en orden optimizado
         for i, passenger_index in enumerate(waypoint_order):
             if passenger_index < len(pasajeros_data):
                 passenger = pasajeros_data[passenger_index]
                 
-                # Calcular distancia y duración desde la ubicación actual
-                distance, duration = get_distance_duration(
-                    current_address, 
-                    passenger["direccion_de_viaje"]
-                )
+                if i < len(legs):
+                    leg = legs[i]
+                    distance = leg['distance_m']
+                    duration = leg['duration_s']
+                else:
+                    current_address = optimized_order[-1]["direccion"]
+                    distance, duration = get_distance_duration(
+                        current_address,
+                        passenger["direccion_de_viaje"]
+                    )
                 
                 cumulative_distance += distance
                 cumulative_duration += duration
@@ -195,13 +305,20 @@ class PickupOptimizer:
                     "cumulative_distance_m": cumulative_distance,
                     "eta_from_start_s": cumulative_duration,
                     "eta_minutes": round(cumulative_duration / 60, 2),
-                    "instruction": f"Recoge al pasajero {i + 1}"
+                    "instruction": f"Recoge al pasajero: {passenger.get('nombre', 'Pasajero')}",
+                    "optimized_order": i + 1,
+                    "original_index": passenger_index
                 })
-                
-                current_address = passenger["direccion_de_viaje"]
         
-        # Agregar destino final
-        final_distance, final_duration = get_distance_duration(current_address, destination)
+        # Destino final
+        if len(legs) > len(waypoint_order):
+            final_leg = legs[-1]
+            final_distance = final_leg['distance_m']
+            final_duration = final_leg['duration_s']
+        else:
+            current_address = optimized_order[-1]["direccion"]
+            final_distance, final_duration = get_distance_duration(current_address, destination)
+        
         cumulative_distance += final_distance
         cumulative_duration += final_duration
         
@@ -216,11 +333,15 @@ class PickupOptimizer:
             "cumulative_distance_m": cumulative_distance,
             "eta_from_start_s": cumulative_duration,
             "eta_minutes": round(cumulative_duration / 60, 2),
-            "instruction": "Dirígete hacia la Universidad"
+            "instruction": "Llegar a la Universidad"
         })
+        
+        print(f"\n✅ Orden final: {[x+1 for x in waypoint_order]}")
+        print("="*60 + "\n")
         
         return {
             "trip_type": "ida",
+            "optimization_method": "school_route_farthest_first",
             "total_steps": len(optimized_order),
             "total_distance_m": cumulative_distance,
             "total_duration_s": cumulative_duration,
@@ -230,31 +351,35 @@ class PickupOptimizer:
     
     def _optimize_dropoff_trip(self, conductor_data: Dict, pasajeros_data: List[Dict], 
                              destination: str) -> Dict:
-        """
-        Optimiza el viaje de regreso (entrega de pasajeros)
-        """
-        # Para el regreso, empezamos desde la universidad
+        """Optimiza el viaje de REGRESO (entrega)"""
         university_address = destination
         passenger_addresses = [p["direccion_de_viaje"] for p in pasajeros_data]
+        conductor_home = conductor_data["direccion_de_viaje"]
         
-        # Usar Google Maps para optimizar la ruta de entrega
-        waypoint_order, legs = get_route_optimization(
-            university_address, 
-            passenger_addresses, 
+        print("\n" + "="*60)
+        print("🏠 OPTIMIZANDO RUTA DE REGRESO (Entrega)")
+        print("="*60)
+        
+        # Usar algoritmo de ruta escolar
+        waypoint_order, legs = school_route_algorithm(
+            university_address,
+            passenger_addresses,
+            conductor_home,
+            "regreso",
             self.api_key
         )
         
-        # Si la optimización falla, usar orden secuencial
         if not waypoint_order:
+            print("⚠️ Usando orden secuencial como fallback")
             waypoint_order = list(range(len(pasajeros_data)))
+            legs = []
         
-        # Construir el orden optimizado
+        # Construir orden optimizado
         optimized_order = []
-        current_address = university_address
         cumulative_distance = 0
         cumulative_duration = 0
         
-        # Agregar universidad como punto de inicio
+        # Paso 0: Universidad
         optimized_order.append({
             "step": 0,
             "type": "university",
@@ -269,16 +394,21 @@ class PickupOptimizer:
             "instruction": "Salida desde la Universidad"
         })
         
-        # Procesar pasajeros en orden optimizado
+        # Pasajeros en orden optimizado
         for i, passenger_index in enumerate(waypoint_order):
             if passenger_index < len(pasajeros_data):
                 passenger = pasajeros_data[passenger_index]
                 
-                # Calcular distancia y duración desde la ubicación actual
-                distance, duration = get_distance_duration(
-                    current_address, 
-                    passenger["direccion_de_viaje"]
-                )
+                if i < len(legs):
+                    leg = legs[i]
+                    distance = leg['distance_m']
+                    duration = leg['duration_s']
+                else:
+                    current_address = optimized_order[-1]["direccion"]
+                    distance, duration = get_distance_duration(
+                        current_address,
+                        passenger["direccion_de_viaje"]
+                    )
                 
                 cumulative_distance += distance
                 cumulative_duration += duration
@@ -294,13 +424,17 @@ class PickupOptimizer:
                     "cumulative_distance_m": cumulative_distance,
                     "eta_from_start_s": cumulative_duration,
                     "eta_minutes": round(cumulative_duration / 60, 2),
-                    "instruction": f"Deja al pasajero {i + 1} en la dirección {passenger['direccion_de_viaje']}"
+                    "instruction": f"Deja al pasajero: {passenger.get('nombre', 'Pasajero')}",
+                    "optimized_order": i + 1,
+                    "original_index": passenger_index
                 })
-                
-                current_address = passenger["direccion_de_viaje"]
+        
+        print(f"\n✅ Orden final: {[x+1 for x in waypoint_order]}")
+        print("="*60 + "\n")
         
         return {
             "trip_type": "regreso",
+            "optimization_method": "school_route_closest_first",
             "total_steps": len(optimized_order),
             "total_distance_m": cumulative_distance,
             "total_duration_s": cumulative_duration,
@@ -309,32 +443,22 @@ class PickupOptimizer:
         }
 
 # ================================================
-# 🔹 Procesamiento de un viaje individual
+# 🔹 Procesamiento
 # ================================================
 def process_trip_with_optimization(df_trip, output_dir="./out", trip_type="ida"):
-    """
-    Procesa un solo viaje con optimización de ruta y genera un archivo JSON con:
-    - Orden óptimo de recogida/entrega
-    - ETA para cada pasajero
-    - Instrucciones para el conductor
-    """
+    """Procesa un viaje con optimización"""
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     trip_id = str(df_trip["trip_id"].iloc[0])
     start_time = datetime.now(timezone.utc).isoformat()
 
-    # 🚗 Identificar conductor y pasajeros
     conductor = df_trip[df_trip["tipo_de_usuario"] == "conductor"].iloc[0].to_dict()
     pasajeros = df_trip[df_trip["tipo_de_usuario"] == "pasajero"].to_dict(orient="records")
 
-    # Obtener destino del viaje (asumiendo que está en el conductor)
     destination = conductor.get("destino", "Universidad")
     
-    # Crear optimizador
     optimizer = PickupOptimizer()
-    
-    # Calcular orden óptimo
     optimized_route = optimizer.calculate_optimal_pickup_order(
         conductor, 
         pasajeros, 
@@ -355,7 +479,6 @@ def process_trip_with_optimization(df_trip, output_dir="./out", trip_type="ida")
         "optimized_route": optimized_route
     }
 
-    # Guardar JSON
     output_file = os.path.join(output_dir, f"optimized_route_{trip_id}_{trip_type}.json")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=4, ensure_ascii=False)
@@ -363,40 +486,25 @@ def process_trip_with_optimization(df_trip, output_dir="./out", trip_type="ida")
     print(f"✅ Archivo creado: {output_file}")
     return result
 
-# ================================================
-# 🔹 API Endpoint para obtener datos del viaje
-# ================================================
 def get_trip_data_for_driver(trip_id: str, trip_type: str = "ida") -> Optional[Dict]:
-    """
-    Obtiene los datos optimizados de un viaje específico para mostrar en la interfaz del conductor
-    """
+    """API endpoint"""
     try:
-        # Obtener datos de la base de datos
         profiles_df, vehicles_df, searching_pool_df, trip_requests_df, confirmed_trips_df, start_of_trip_df, _ = get_wheels_dataframes()
         
-        # Filtrar por trip_id
         trip_data = start_of_trip_df[start_of_trip_df["trip_id"] == int(trip_id)]
         
         if trip_data.empty:
             return None
         
-        # Procesar el viaje
         result = process_trip_with_optimization(trip_data, trip_type=trip_type)
-        
         return result
         
     except Exception as e:
-        print(f"❌ Error al obtener datos del viaje {trip_id}: {e}")
+        print(f"❌ Error: {e}")
         return None
 
-# ================================================
-# 🔹 Procesar todos los viajes
-# ================================================
 def process_all_trips(start_of_trip_df, output_dir="./out", trip_type="ida"):
-    """
-    Procesa todos los viajes en el DataFrame (agrupados por trip_id).
-    Retorna un diccionario con los resultados de cada viaje.
-    """
+    """Procesa todos los viajes"""
     resultados = {}
     for trip_id, df_trip in start_of_trip_df.groupby("trip_id"):
         print(f"\n🔹 Procesando viaje {trip_id} ({trip_type})...")
@@ -404,22 +512,16 @@ def process_all_trips(start_of_trip_df, output_dir="./out", trip_type="ida"):
     return resultados
 
 # ================================================
-# 📌 EJEMPLO DE USO
+# 📌 MAIN
 # ================================================
 if __name__ == "__main__":
     profiles_df, vehicles_df, searching_pool_df, trip_requests_df, confirmed_trips_df, start_of_trip_df, start_of_trip_response = get_wheels_dataframes()
     
-    # Procesar TODOS los viajes en start_of_trip (ida)
-    print("🚀 Procesando viajes de IDA...")
-    resultados_ida = process_all_trips(start_of_trip_df, trip_type="ida")
+    print("🚌 Algoritmo de Ruta Escolar")
+    print("IDA: Recoger del MÁS LEJOS al más cerca")
+    print("REGRESO: Dejar del MÁS CERCA al más lejos\n")
     
-    # Procesar TODOS los viajes en start_of_trip (regreso)
-    print("\n🚀 Procesando viajes de REGRESO...")
+    resultados_ida = process_all_trips(start_of_trip_df, trip_type="ida")
     resultados_regreso = process_all_trips(start_of_trip_df, trip_type="regreso")
     
-    # Mostrar resultados en pantalla
-    print("\n📊 RESULTADOS VIAJES DE IDA:")
-    print(json.dumps(resultados_ida, indent=4, ensure_ascii=False))
-    
-    print("\n📊 RESULTADOS VIAJES DE REGRESO:")
-    print(json.dumps(resultados_regreso, indent=4, ensure_ascii=False))
+    print("\n📊 COMPLETADO")

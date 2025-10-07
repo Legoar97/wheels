@@ -197,9 +197,15 @@ const GooglePlacesAutocomplete = ({ onPlaceSelected, ctaTitle = "Confirmar Direc
         />
       </div>
       
+      {/* ✅ ARREGLADO: Removí backgroundColor y agregué border */}
       <div 
         ref={mapRef} 
-        style={{ height: '300px', width: '100%', borderRadius: '0.5rem', backgroundColor: '#212121' }}
+        style={{ 
+          height: '300px', 
+          width: '100%', 
+          borderRadius: '0.5rem',
+          border: '1px solid #e5e7eb'
+        }}
         aria-label="Mapa para mostrar la dirección seleccionada y la ruta"
       />
 
