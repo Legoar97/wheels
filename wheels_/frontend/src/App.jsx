@@ -1,3 +1,5 @@
+// wheels_/frontend/src/App.jsx
+
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
@@ -14,7 +16,7 @@ import ActiveTripBar from '@/components/ActiveTripBar';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/supabaseClient';
 import { useAuth } from '@/contexts/AuthContext';
-import { TripProvider } from '@/contexts/TripContext';
+import { TripProvider } from '@/contexts/TripContext'; // ✅ Solo importar el Provider
 
 const pageVariants = {
   initial: { opacity: 0, x: "100vw" },
@@ -89,7 +91,6 @@ const App = () => {
   return (
     <TripProvider>
       <div className="mobile-container bg-background text-foreground min-h-screen">
-        {/* Barra persistente de viaje activo */}
         <ActiveTripBar />
         
         <AnimatePresence mode="wait">

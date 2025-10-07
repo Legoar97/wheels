@@ -1,3 +1,5 @@
+// wheels_/frontend/src/services/pythonMatchmakingService.js
+
 // Función para calcular distancia espacial (fallback)
 function calculateSpatialDistance(point1, point2) {
   const R = 6371; // Radio de la Tierra en km
@@ -13,68 +15,22 @@ function calculateSpatialDistance(point1, point2) {
 // Servicio para conectar con el script Python de emparejamiento
 export class PythonMatchmakingService {
   
-  // Función para ejecutar el script Python (en producción esto sería una API)
-  static async executePythonScript() {
-    try {
-      // En desarrollo, simulamos la respuesta del Python
-      // En producción, esto sería una llamada HTTP a tu servidor Python
-      
-      console.log("🐍 Ejecutando script Python de emparejamiento...");
-      
-      // Simular delay del procesamiento Python
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Simular la respuesta JSON que retorna tu Python (con distancias de Google Maps)
-      const pythonResponse = [
-        {
-          "conductor_id": "15589b1c-7e6b-45e2-b89d-69d1c95b842b",
-          "nombre_conductor": "juan",
-          "pickup": "Av. Boyacá #17a-63, Bogotá, Colombia",
-          "destino": "Hacia la universidad",
-          "pasajeros_asignados": [
-            {
-              "pasajero_id": "4b15ca14-ff3e-4d8e-bda0-2f2ff5b7af03",
-              "nombre": "jesus",
-              "pickup": "Av. Boyacá #17a-63, Bogotá, Colombia",
-              "destino": "Hacia la universidad",
-              "distance_km": 2.3,
-              "duration": "8 min",
-              "distance_source": "google_maps"
-            }
-          ]
-        }
-      ];
-      
-      console.log("✅ Respuesta del Python:", pythonResponse);
-      return pythonResponse;
-      
-    } catch (error) {
-      console.error("❌ Error ejecutando Python:", error);
-      throw new Error("No se pudo ejecutar el emparejamiento Python");
-    }
-  }
-  
-  // Función para ejecutar Python en producción (API REST)
+  // ===== ACTUALIZADO: Usar el endpoint correcto =====
   static async executePythonAPI() {
     try {
-      // Determinar la URL base de la API
       const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
       
       console.log("🐍 Llamando a la API Python de matchmaking...");
       
-      // Crear un AbortController para timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 segundos timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       
+      // ✅ ACTUALIZADO: Usar GET en lugar de POST
       const response = await fetch(`${API_BASE_URL}/api/python-matchmaking`, {
-        method: 'POST',
+        method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          action: 'run_matchmaking',
-          timestamp: new Date().toISOString()
-        }),
         signal: controller.signal
       });
       
@@ -100,7 +56,7 @@ export class PythonMatchmakingService {
       }
       
       if (error.message.includes('fetch')) {
-        throw new Error('No se pudo conectar con la API Python. Asegúrate de ejecutar: python matchmaking_api.py');
+        throw new Error('No se pudo conectar con la API Python. Asegúrate de ejecutar: python wheels_api.py');
       }
       
       console.error("❌ Error en API Python:", error);
@@ -108,44 +64,34 @@ export class PythonMatchmakingService {
     }
   }
   
-  // Función para ejecutar Python localmente (usando child_process en Node.js)
-  static async executePythonLocal() {
+  // ===== NUEVO: Obtener estado activo del usuario =====
+  static async getUserActiveState(userEmail) {
     try {
-      // En desarrollo local, podrías usar Node.js para ejecutar Python
-      // Esto requiere que tengas Node.js con child_process
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
       
-      console.log("🐍 Ejecutando Python localmente...");
+      console.log(`🔍 Obteniendo estado activo para: ${userEmail}`);
       
-      // Simular ejecución local (con distancias de Google Maps)
-      const localResponse = [
-        {
-          "conductor_id": "local-test-123",
-          "nombre_conductor": "Conductor Local",
-          "pickup": "Ubicación de prueba",
-          "destino": "Destino de prueba",
-          "pasajeros_asignados": [
-            {
-              "pasajero_id": "local-passenger-456",
-              "nombre": "Pasajero Local",
-              "pickup": "Pickup de prueba",
-              "destino": "Destino de prueba",
-              "distance_km": 1.8,
-              "duration": "6 min",
-              "distance_source": "google_maps"
-            }
-          ]
+      const response = await fetch(`${API_BASE_URL}/api/user-active-state/${encodeURIComponent(userEmail)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
         }
-      ];
+      });
       
-      return localResponse;
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      return data;
       
     } catch (error) {
-      console.error("❌ Error ejecutando Python local:", error);
+      console.error("❌ Error obteniendo estado del usuario:", error);
       throw error;
     }
   }
   
-  // Función para obtener matches de un usuario específico por email
+  // ===== ACTUALIZADO: Usar el endpoint correcto para matches del usuario =====
   static async getUserMatches(userEmail) {
     try {
       const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
@@ -177,15 +123,214 @@ export class PythonMatchmakingService {
     }
   }
   
-  // Función para obtener matches usando Supabase como fallback
+  // ===== NUEVO: Obtener viaje del pasajero =====
+  static async getPassengerTrip(userEmail) {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
+      
+      console.log(`🔍 Obteniendo viaje del pasajero: ${userEmail}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/passenger-trip/${encodeURIComponent(userEmail)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null; // No hay viaje activo
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        return null;
+      }
+      
+      return data.trip;
+      
+    } catch (error) {
+      console.error("❌ Error obteniendo viaje del pasajero:", error);
+      return null;
+    }
+  }
+  
+  // ===== NUEVO: Obtener viaje activo del conductor =====
+  static async getDriverActiveTrip(driverEmail) {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
+      
+      console.log(`🔍 Obteniendo viaje activo del conductor: ${driverEmail}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/driver/${encodeURIComponent(driverEmail)}/active-trip`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 404) {
+          return null; // No hay viaje activo
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        return null;
+      }
+      
+      return data.trip;
+      
+    } catch (error) {
+      console.error("❌ Error obteniendo viaje del conductor:", error);
+      return null;
+    }
+  }
+  
+  // ===== NUEVO: Completar dropoff de pasajero =====
+  static async completePassengerDropoff(tripId, passengerEmail) {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
+      
+      console.log(`✅ Completando dropoff de ${passengerEmail} en viaje ${tripId}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/trip/${tripId}/complete-passenger/${encodeURIComponent(passengerEmail)}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Error completando dropoff');
+      }
+      
+      return data;
+      
+    } catch (error) {
+      console.error("❌ Error completando dropoff:", error);
+      throw error;
+    }
+  }
+  
+  // ===== NUEVO: Completar viaje completo =====
+  static async completeTrip(tripId, driverEmail) {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
+      
+      console.log(`🏁 Completando viaje ${tripId}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/trip/${tripId}/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          driver_email: driverEmail
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Error completando viaje');
+      }
+      
+      return data;
+      
+    } catch (error) {
+      console.error("❌ Error completando viaje:", error);
+      throw error;
+    }
+  }
+  
+  // ===== NUEVO: Obtener estado del viaje =====
+  static async getTripStatus(tripId) {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
+      
+      console.log(`🔍 Obteniendo estado del viaje ${tripId}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/trip/${tripId}/status`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Error obteniendo estado');
+      }
+      
+      return data.trip;
+      
+    } catch (error) {
+      console.error("❌ Error obteniendo estado del viaje:", error);
+      throw error;
+    }
+  }
+  
+  // ===== NUEVO: Obtener pasajeros del viaje =====
+  static async getTripPassengers(tripId) {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
+      
+      console.log(`🔍 Obteniendo pasajeros del viaje ${tripId}`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/trip/${tripId}/passengers`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Error obteniendo pasajeros');
+      }
+      
+      return data;
+      
+    } catch (error) {
+      console.error("❌ Error obteniendo pasajeros del viaje:", error);
+      throw error;
+    }
+  }
+  
+  // Mantener funciones existentes...
   static async executeSupabaseFallback() {
     try {
       console.log("🔄 Usando Supabase como fallback...");
       
-      // Importar supabase dinámicamente
       const { supabase } = await import('../lib/supabaseClient');
       
-      // Obtener datos del searching pool activo
       const { data: searchingPool, error: poolError } = await supabase
         .from('searching_pool')
         .select(`
@@ -205,7 +350,6 @@ export class PythonMatchmakingService {
         return [];
       }
       
-      // Separar conductores y pasajeros
       const drivers = searchingPool.filter(record => record.tipo_de_usuario === 'conductor');
       const passengers = searchingPool.filter(record => record.tipo_de_usuario === 'pasajero');
       
@@ -213,13 +357,11 @@ export class PythonMatchmakingService {
       
       const matches = [];
       
-      // Emparejamiento básico por destino (con distancia espacial como fallback)
       for (const driver of drivers) {
         const matchedPassengers = passengers
           .filter(passenger => passenger.destino === driver.destino)
           .slice(0, driver.available_seats || 1)
           .map(passenger => {
-            // Calcular distancia espacial como fallback
             const distance = calculateSpatialDistance(
               { lat: driver.pickup_lat, lng: driver.pickup_lng },
               { lat: passenger.pickup_lat, lng: passenger.pickup_lng }
@@ -238,7 +380,6 @@ export class PythonMatchmakingService {
           });
         
         if (matchedPassengers.length > 0) {
-          // Ordenar pasajeros por distancia para optimizar ruta
           const sortedPassengers = matchedPassengers.sort((a, b) => a.distance_km - b.distance_km);
           
           matches.push({
@@ -250,7 +391,6 @@ export class PythonMatchmakingService {
             available_seats: driver.available_seats || 1,
             price_per_seat: driver.price_per_seat || 0,
             pasajeros_asignados: sortedPassengers,
-            // Agregar información adicional para el orden de recogida
             pickup_order: sortedPassengers.map((passenger, index) => ({
               step: index + 1,
               passenger_id: passenger.pasajero_id,
@@ -272,17 +412,11 @@ export class PythonMatchmakingService {
     }
   }
   
-  // Función para detectar si es un dispositivo móvil
-  static isMobileDevice() {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  }
-
-  // Función para verificar si la API está disponible
   static async checkApiAvailability() {
     try {
       const API_BASE_URL = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:5000';
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 segundos para verificación rápida
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
       
       const response = await fetch(`${API_BASE_URL}/api/health`, {
         method: 'GET',
@@ -297,10 +431,8 @@ export class PythonMatchmakingService {
     }
   }
 
-  // Función principal que decide cómo ejecutar Python
   static async runMatchmaking() {
     try {
-      // Verificar si se fuerza el uso de fallback
       const forceFallback = import.meta.env.VITE_FORCE_FALLBACK === 'true';
       const apiDisabled = import.meta.env.VITE_PYTHON_API_URL === 'disabled';
       
@@ -309,7 +441,6 @@ export class PythonMatchmakingService {
         return await this.executeSupabaseFallback();
       }
       
-      // Verificar disponibilidad de la API primero
       const isApiAvailable = await this.checkApiAvailability();
       
       if (!isApiAvailable) {
@@ -317,22 +448,18 @@ export class PythonMatchmakingService {
         return await this.executeSupabaseFallback();
       }
       
-      // Intentar usar la API real de Python
       return await this.executePythonAPI();
       
     } catch (error) {
       console.error("❌ Error en API Python:", error);
       console.log("🔄 Cambiando a fallback de Supabase...");
       
-      // Si la API falla, usar Supabase como fallback
       try {
         return await this.executeSupabaseFallback();
       } catch (fallbackError) {
         console.error("❌ Error en fallback:", fallbackError);
-        console.log("🔄 Usando simulación como último recurso...");
-        return await this.executePythonScript();
+        return [];
       }
     }
   }
 }
-

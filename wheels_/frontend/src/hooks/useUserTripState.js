@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useTrip } from '@/contexts/TripContext';
+import { useTrip } from '@/hooks/useTrip';
 import { useAuth } from '@/contexts/AuthContext';
 
 export const useUserTripState = () => {

@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { usePythonMatchmaking } from '@/hooks/usePythonMatchmaking';
-import { useTrip } from '@/contexts/TripContext';
+import { useTrip } from '@/hooks/useTrip';
 
 const TravelFlow = ({ currentUser, pageVariants, pageTransition }) => {
   const [currentStep, setCurrentStep] = useState('userType');

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useTrip } from '@/contexts/TripContext';
+import { useTrip } from '@/hooks/useTrip';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { MapPin, Clock, Users, CheckCircle } from 'lucide-react';
