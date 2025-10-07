@@ -28,6 +28,61 @@ export const TripProvider = ({ children }) => {
     try {
       console.log('🔍 Detectando estado del usuario:', userEmail);
       
+      // ✅ NUEVA PRIORIDAD: Primero verificar si hay un viaje activo en trip_data
+      const { data: tripDataRecords } = await supabase
+        .from('trip_data')
+        .select('*')
+        .eq('status', 'in_progress')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (tripDataRecords && tripDataRecords.length > 0) {
+        // Buscar si el usuario es conductor o pasajero en algún viaje
+        for (const trip of tripDataRecords) {
+          // Verificar si es conductor
+          const { data: driverProfile } = await supabase
+            .from('profiles')
+            .select('email')
+            .eq('id', trip.driver_id)
+            .single();
+          
+          if (driverProfile?.email === userEmail) {
+            console.log('✅ Usuario es conductor en viaje activo:', trip.id);
+            return {
+              state: 'in_trip',
+              data: {
+                trip_id: trip.id,
+                role: 'conductor',
+                state: 'in_trip',
+                status: 'in_progress'
+              },
+              screen: `/trip/${trip.id}`
+            };
+          }
+          
+          // Verificar si es pasajero
+          const passengersData = trip.passengers_data || [];
+          const isPassenger = passengersData.some(p => 
+            p.passenger_email === userEmail || p.correo === userEmail
+          );
+          
+          if (isPassenger) {
+            console.log('✅ Usuario es pasajero en viaje activo:', trip.id);
+            return {
+              state: 'in_trip',
+              data: {
+                trip_id: trip.id,
+                role: 'pasajero',
+                state: 'in_trip',
+                status: 'in_progress'
+              },
+              screen: `/trip/${trip.id}`
+            };
+          }
+        }
+      }
+      
+      // Fallback al método anterior
       const stateData = await PythonMatchmakingService.getUserActiveState(userEmail);
       
       if (stateData.state === 'in_trip') {
@@ -39,32 +94,10 @@ export const TripProvider = ({ children }) => {
             trip_id: stateData.trip.trip_id,
             state: 'in_trip'
           },
-          screen: '/app'
+          screen: `/trip/${stateData.trip.trip_id}`
         };
       }
       
-      if (stateData.state === 'acceptance_pending') {
-        return {
-          state: 'acceptance_pending',
-          data: {
-            ...stateData.acceptance,
-            role: stateData.acceptance.driver_email === userEmail ? 'conductor' : 'pasajero'
-          },
-          screen: '/app'
-        };
-      }
-      
-      if (stateData.state === 'matched') {
-        return {
-          state: 'matched',
-          data: {
-            ...stateData.pool,
-            role: stateData.pool.tipo_de_usuario
-          },
-          screen: '/app'
-        };
-      }
-
       return { state: 'idle', data: null, screen: null };
       
     } catch (error) {

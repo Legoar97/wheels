@@ -61,8 +61,14 @@ const ActiveTripBar = () => {
   const handleViewTrip = () => {
     console.log('🚗 ActiveTripBar - Redirigiendo a viaje, estado:', activeTrip.state);
     
-    // Lógica simplificada: siempre redirigir a /app (pantalla de matchmaking)
-    navigate('/app');
+    // ✅ CORREGIDO: Redirigir según el estado del viaje
+    if (activeTrip.state === 'in_trip' && activeTrip.trip_id) {
+      // Si hay un viaje en curso con ID, ir a la pantalla del viaje
+      navigate(`/trip/${activeTrip.trip_id}`);
+    } else {
+      // Si no hay ID de viaje, ir a matchmaking
+      navigate('/app');
+    }
   };
 
   return (

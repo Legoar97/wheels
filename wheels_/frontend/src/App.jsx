@@ -71,14 +71,20 @@ const App = () => {
   };
 
   useEffect(() => {
-    setIsLoading(true);
-    if (session) {
-      checkUserProfile(session.user);
-    } else {
-      setCurrentUser(null);
-    }
-    setIsLoading(false);
-  }, [session]);
+    const checkUserState = async () => {
+      if (!currentUser?.email) return;
+      
+      console.log('🔍 Verificando estado del usuario al cargar App');
+      const state = await detectUserState(currentUser.email);
+      
+      if (state.state === 'in_trip' && state.data?.trip_id) {
+        console.log('✅ Viaje activo detectado, estableciendo en contexto:', state.data);
+        setTrip(state.data, state.screen);
+      }
+    };
+    
+    checkUserState();
+  }, [currentUser?.email]);
 
   if (isLoading && !session) {
     return (
