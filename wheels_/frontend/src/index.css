@@ -1,0 +1,144 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+:root {
+  --background: 240 100% 99%; /* Gris muy claro, casi blanco F7F7F7 */
+  --foreground: 150 4% 15%; /* Gris oscuro para texto principal #242726 */
+  
+  --card: 0 0% 100%; /* Blanco #FFFFFF */
+  --card-foreground: 150 4% 15%; /* Gris oscuro para texto en cards */
+  
+  --popover: 0 0% 100%; /* Blanco */
+  --popover-foreground: 150 4% 15%; /* Gris oscuro para texto en popovers */
+  
+  --primary: 145 75% 30%; /* Verde principal oscuro #137A3A */
+  --primary-foreground: 145 75% 95%; /* Blanco verdoso muy claro para contraste #E9F7EE */
+  
+  --secondary: 145 60% 45%; /* Verde secundario medio #3BA363 */
+  --secondary-foreground: 0 0% 100%; /* Blanco */
+  
+  --muted: 220 15% 95%; /* Gris claro #F0F1F3 */
+  --muted-foreground: 220 10% 45%; /* Gris medio #6A6F7C */
+  
+  --accent: 145 50% 55%; /* Verde acento más claro #5CC283 */
+  --accent-foreground: 0 0% 100%; /* Blanco */
+  
+  --destructive: 0 72% 51%; /* Rojo para errores #E53E3E */
+  --destructive-foreground: 0 0% 100%; /* Blanco */
+  
+  --border: 220 15% 90%; /* Gris claro para bordes #E0E2E7 */
+  --input: 0 0% 100%; /* Blanco para inputs */
+  --ring: 145 75% 30%; /* Verde principal para focus rings */
+  
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: 150 5% 10%; /* Gris muy oscuro #181A19 */
+  --foreground: 150 5% 95%; /* Gris muy claro para texto #F0F2F1 */
+  
+  --card: 150 5% 15%; /* Gris oscuro para cards #232725 */
+  --card-foreground: 150 5% 95%;
+  
+  --popover: 150 5% 15%;
+  --popover-foreground: 150 5% 95%;
+
+  --primary: 145 60% 45%; /* Verde secundario medio para dark primary #3BA363 */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 145 75% 30%; /* Verde principal oscuro para dark secondary #137A3A */
+  --secondary-foreground: 145 75% 95%;
+  
+  --muted: 150 5% 20%; /* Gris medio oscuro #2E3331 */
+  --muted-foreground: 150 5% 65%; /* Gris claro #A1A8A5 */
+  
+  --accent: 145 50% 55%; /* Verde acento #5CC283 */
+  --accent-foreground: 0 0% 100%;
+  
+  --destructive: 0 63% 45%; /* Rojo más oscuro #D53939 */
+  --destructive-foreground: 0 0% 100%;
+  
+  --border: 150 5% 25%; /* Gris oscuro para bordes #3C423F */
+  --input: 150 5% 20%; /* Gris medio oscuro para inputs */
+  --ring: 145 60% 45%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.gradient-bg {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%);
+}
+
+.glass-effect {
+  background: hsla(var(--card), 0.8);
+  backdrop-filter: blur(8px); /* Slightly reduced blur for clarity */
+  border: 1px solid hsla(var(--border), 0.15); /* Softer border */
+}
+
+.mobile-container {
+  max-width: 428px;
+  margin: 0 auto;
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  background-color: hsl(var(--background)); /* Ensure container bg matches body */
+}
+
+.animate-float {
+  animation: float 5s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); } 
+}
+
+.animate-pulse-slow {
+  animation: pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.shadow-glow {
+  box-shadow: 0 0 12px hsla(var(--primary), 0.25); 
+}
+
+.text-shadow {
+  text-shadow: 1px 1px 2px hsla(var(--foreground), 0.15); 
+}
+
+.bg-input {
+  background-color: hsl(var(--input)) !important;
+}
+.text-foreground {
+  color: hsl(var(--foreground)) !important;
+}
+.placeholder\:text-muted-foreground::placeholder {
+  color: hsl(var(--muted-foreground)) !important;
+}
+.border-input {
+  border-color: hsl(var(--border)) !important;
+}
+
+/* Minimalist button adjustments */
+.btn-minimal {
+  box-shadow: none !important;
+}
+
+/* Smooth transitions for elements */
+.smooth-transition {
+  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 300ms;
+}
